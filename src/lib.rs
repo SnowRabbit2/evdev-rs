@@ -59,7 +59,7 @@ use nix::errno::Errno;
 use std::any::Any;
 use std::ffi::CString;
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::{RawFd, IntoRawFd, AsRawFd, FromRawFd};
 
 use enums::*;
 use util::*;
@@ -132,6 +132,7 @@ pub struct AbsInfo {
 /// Opaque struct representing an evdev device
 pub struct Device {
     raw: *mut raw::libevdev,
+    owning: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -179,11 +180,20 @@ impl Device {
         } else {
             Some(Device {
                 raw: libevdev,
+                owning: false
             })
         }
     }
 
-    /// Initialize a new libevdev device from the given fd.
+    fn new_from_fd(fd: RawFd, owning: bool) -> Result<Device> {
+        let mut libevdev = 0 as *mut _;
+        try_errno!(unsafe {
+            raw::libevdev_new_from_fd(fd, &mut libevdev)
+        });
+        Ok(Device { raw: libevdev, owning })
+    }
+
+    /// Initialize a new libevdev device from the given IntoRawFd.
     ///
     /// This is a shortcut for
     ///
@@ -195,12 +205,24 @@ impl Device {
     /// # let fd = File::open("/dev/input/event0").unwrap();
     /// device.set_fd(&fd);
     /// ```
-    pub fn new_from_fd(fd: &File) -> Result<Device> {
-        let mut libevdev = 0 as *mut _;
-        try_errno!(unsafe {
-            raw::libevdev_new_from_fd(fd.as_raw_fd(), &mut libevdev)
-        });
-        Ok(Device { raw: libevdev })
+    pub fn new_from_file_owning<F: IntoRawFd>(file: F) -> Result<Device> {
+        Self::new_from_fd(file.into_raw_fd(), true)
+    }
+
+    /// Initialize a new libevdev device from the given AsRawFd.
+    ///
+    /// This is a shortcut for
+    ///
+    /// ```
+    /// use evdev_rs::Device;
+    /// # use std::fs::File;
+    ///
+    /// let mut device = Device::new().unwrap();
+    /// # let fd = File::open("/dev/input/event0").unwrap();
+    /// device.set_fd(&fd);
+    /// ```
+    pub fn new_from_file_borrowing<F: AsRawFd>(file: &F) -> Result<Device> {
+        Self::new_from_fd(file.as_raw_fd(), false)
     }
 
     string_getter!(name, libevdev_get_name,
@@ -210,22 +232,50 @@ impl Device {
                    set_phys, libevdev_set_phys,
                    set_uniq, libevdev_set_uniq);
 
-    /// Returns the file associated with the device
+    /// Returns the file descriptor associated with the device
     ///
-    /// if the `set_fd` hasn't been called yet then it return `None`
-    pub fn fd(&self) -> Option<File> {
-        let result = unsafe {
-            raw::libevdev_get_fd(self.raw)
-        };
+    /// if the file descriptor hasn't been set yet then it return `None`
+    pub unsafe fn fd(&self) -> Option<RawFd> {
+        let result = raw::libevdev_get_fd(self.raw);
 
         if result == 0 {
             None
         } else {
-            unsafe {
-                let f = File::from_raw_fd(result);
-                Some(f)
-            }
+            let f = result;
+            Some(f)
         }
+    }
+
+    /// Consumes this Device instance and returns the associated file
+    ///
+    /// if the file descriptor hasn't been set yet then it return `None`
+    pub fn into_file(self) -> Option<File> {
+        unsafe {
+            self.fd().map(|fd| File::from_raw_fd(fd))
+        }
+    }
+
+    /// Returns a (dup'd, rc'd) clone the associated file
+    ///
+    /// if the file descriptor hasn't been set yet then it return `None`
+    pub fn file_clone(&self) -> Option<Result<File>> {
+        unsafe {
+            self.fd().map(|fd| {
+                let newfd = nix::libc::dup(fd);
+                if newfd < 0 {
+                    Error::errno_from_i32(nix::errno::errno())
+                }
+                else {
+                    Ok(File::from_raw_fd(newfd))
+                }
+            })
+        }
+    }
+
+    fn set_fd(&mut self, fd: RawFd, owning: bool) -> Result<()> {
+        try_errno!(unsafe { raw::libevdev_set_fd(self.raw, fd) });
+        self.owning = owning;
+        Ok(())
     }
 
     /// Set the file for this struct and initialize internal data.
@@ -236,9 +286,20 @@ impl Device {
     ///
     /// Unless otherwise specified, evdev function behavior is undefined until
     /// a successfull call to `set_fd`.
-    pub fn set_fd(&mut self, f: &File) -> Result<()> {
-        try_errno!(unsafe { raw::libevdev_set_fd(self.raw, f.as_raw_fd()) });
-        Ok(())
+    pub fn set_file_owning<F: IntoRawFd>(&mut self, file: F) -> Result<()> {
+        self.set_fd(file.into_raw_fd(), true)
+    }
+
+    /// Set the file for this struct and initialize internal data.
+    ///
+    /// This function may only be called once per device. If the device changed and
+    /// you need to re-read a device, use `new` method. If you need to change the file after
+    /// closing and re-opening the same device, use `change_fd`.
+    ///
+    /// Unless otherwise specified, evdev function behavior is undefined until
+    /// a successfull call to `set_fd`.
+    pub fn set_file_borrowing<F: AsRawFd>(&mut self, file: &F) -> Result<()> {
+        self.set_fd(file.as_raw_fd(), false)
     }
 
     /// Change the fd for this device, without re-reading the actual device.
@@ -263,7 +324,11 @@ impl Device {
     /// call libevdev_grab() again.
     ///
     /// It is an error to call this function before calling set_fd().
-    pub fn change_fd(&mut self, f: &File) -> Result<()>  {
+    pub fn change_fd<F: AsRawFd>(&mut self, f: &F) -> Result<()>  {
+        if self.owning {
+            panic!("change_fd is not compatible with owned file")
+        }
+
         try_errno!(unsafe { raw::libevdev_change_fd(self.raw, f.as_raw_fd()) });
         Ok(())
     }
@@ -812,6 +877,9 @@ impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
             raw::libevdev_free(self.raw);
+            if self.owning {
+                libc::close(raw::libevdev_get_fd(self.raw));
+            }
         }
     }
 }
