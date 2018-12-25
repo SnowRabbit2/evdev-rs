@@ -53,6 +53,7 @@ pub mod logging;
 pub mod util;
 #[macro_use]
 mod macros;
+pub mod uinput;
 
 use libc::{c_int, c_long, c_uint, c_void};
 use nix::errno::Errno;
