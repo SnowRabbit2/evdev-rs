@@ -150,6 +150,20 @@ pub struct InputEvent {
     pub value: i32,
 }
 
+pub enum Error {
+    Errno(nix::errno::Errno),
+    InvalidAny,
+    InvalidAxis,
+}
+
+impl Error {
+    fn errno_from_i32<R>(errno: i32) -> Result<R> {
+        Err(Error::Errno(Errno::from_i32(errno)))
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
 impl Device {
     /// Initialize a new libevdev device.
     ///
@@ -181,16 +195,12 @@ impl Device {
     /// # let fd = File::open("/dev/input/event0").unwrap();
     /// device.set_fd(&fd);
     /// ```
-    pub fn new_from_fd(fd: &File) -> Result<Device, Errno> {
+    pub fn new_from_fd(fd: &File) -> Result<Device> {
         let mut libevdev = 0 as *mut _;
-        let result = unsafe {
+        try_errno!(unsafe {
             raw::libevdev_new_from_fd(fd.as_raw_fd(), &mut libevdev)
-        };
-
-        match result {
-            0 => Ok(Device { raw: libevdev }),
-            error => Err(Errno::from_i32(-error)),
-        }
+        });
+        Ok(Device { raw: libevdev })
     }
 
     string_getter!(name, libevdev_get_name,
@@ -226,15 +236,9 @@ impl Device {
     ///
     /// Unless otherwise specified, evdev function behavior is undefined until
     /// a successfull call to `set_fd`.
-    pub fn set_fd(&mut self, f: &File) -> Result<(), Errno> {
-        let result = unsafe {
-            raw::libevdev_set_fd(self.raw, f.as_raw_fd())
-        };
-
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+    pub fn set_fd(&mut self, f: &File) -> Result<()> {
+        try_errno!(unsafe { raw::libevdev_set_fd(self.raw, f.as_raw_fd()) });
+        Ok(())
     }
 
     /// Change the fd for this device, without re-reading the actual device.
@@ -259,15 +263,9 @@ impl Device {
     /// call libevdev_grab() again.
     ///
     /// It is an error to call this function before calling set_fd().
-    pub fn change_fd(&mut self, f: &File) -> Result<(), Errno>  {
-        let result = unsafe {
-            raw::libevdev_change_fd(self.raw, f.as_raw_fd())
-        };
-
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+    pub fn change_fd(&mut self, f: &File) -> Result<()>  {
+        try_errno!(unsafe { raw::libevdev_change_fd(self.raw, f.as_raw_fd()) });
+        Ok(())
     }
 
     /// Grab or ungrab the device through a kernel EVIOCGRAB.
@@ -280,15 +278,9 @@ impl Device {
     /// A grab is an operation tied to a file descriptor, not a device. If a
     /// client changes the file descriptor with libevdev_change_fd(), it must
     /// also re-issue a grab with libevdev_grab().
-    pub fn grab(&mut self, grab: GrabMode) -> Result<(), Errno> {
-        let result = unsafe {
-            raw::libevdev_grab(self.raw, grab as c_int)
-        };
-
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error)),
-        }
+    pub fn grab(&mut self, grab: GrabMode) -> Result<()> {
+        try_errno!(unsafe { raw::libevdev_grab(self.raw, grab as c_int) });
+        Ok(())
     }
 
     /// Get the axis info for the given axis, as advertised by the kernel.
@@ -358,7 +350,7 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    pub fn enable(&self, blob: &Any) -> Result<(),Errno> {
+    pub fn enable(&self, blob: &Any) -> Result<()> {
         if let Some(ev_type) = blob.downcast_ref::<EventType>() {
             self.enable_event_type(ev_type)
         } else if let Some(ev_code) = blob.downcast_ref::<EventCode>() {
@@ -366,7 +358,7 @@ impl Device {
         } else if let Some(prop) = blob.downcast_ref::<InputProp>() {
             self.enable_property(prop)
         } else {
-            Err(Errno::from_i32(-1))
+            Err(Error::InvalidAny)
         }
     }
 
@@ -378,16 +370,14 @@ impl Device {
     }
 
     /// Enables this property, a call to `set_fd` will overwrite any previously set values
-    fn enable_property(&self, prop: &InputProp) -> Result<(), Errno> {
-        let result = unsafe {
+    fn enable_property(&self, prop: &InputProp) -> Result<()> {
+        try_errno!(unsafe {
             raw::libevdev_enable_property(self.raw, prop.clone() as c_uint) as i32
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
+
     /// Returns `true` is the device support this event type and `false` otherwise
     fn has_event_type(&self, ev_type: &EventType) -> bool {
         unsafe {
@@ -441,20 +431,15 @@ impl Device {
     /// If the device supports ABS_MT_SLOT and the type is EV_ABS and the code is
     /// ABS_MT_SLOT, the value must be a positive number less then the number of
     /// slots on the device. Otherwise, `set_event_value` returns Err.
-    pub fn set_event_value(&self, code: &EventCode, val: i32)
-                           -> Result<(), Errno> {
-            let (ev_type, ev_code) = event_code_to_int(code);
-            let result = unsafe {
-                raw::libevdev_set_event_value(self.raw,
-                                              ev_type,
-                                              ev_code,
-                                              val as c_int)
-            };
-
-            match result {
-               0 => Ok(()),
-               error => Err(Errno::from_i32(-error))
-            }
+    pub fn set_event_value(&self, code: &EventCode, val: i32) -> Result<()> {
+        let (ev_type, ev_code) = event_code_to_int(code);
+        try_errno!(unsafe {
+            raw::libevdev_set_event_value(self.raw,
+                                          ev_type,
+                                          ev_code,
+                                          val as c_int)
+        });
+        Ok(())
     }
 
     /// Check if there are events waiting for us.
@@ -534,20 +519,16 @@ impl Device {
     ///
     /// This function does not set event values for axes outside the ABS_MT range,
     /// use `set_event_value` instead.
-    pub fn set_slot_value(&self, slot: u32, code: &EventCode, val: i32)
-                          -> Result<(), Errno> {
+    pub fn set_slot_value(&self, slot: u32, code: &EventCode, val: i32) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
-        let result = unsafe {
+        try_errno!(unsafe {
             raw::libevdev_set_slot_value(self.raw,
                                          slot as c_uint,
                                          ev_code,
                                          val as c_int)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
     /// Get the number of slots supported by this device.
@@ -564,7 +545,7 @@ impl Device {
 
         match result  {
             -1 => None,
-             slots => Some(slots),
+            slots => Some(slots),
         }
     }
 
@@ -582,7 +563,7 @@ impl Device {
 
         match result {
             -1 => None,
-             slots => Some(slots),
+            slots => Some(slots),
         }
     }
 
@@ -592,33 +573,26 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    fn enable_event_type(&self, ev_type: &EventType) -> Result<(), Errno> {
-         let result = unsafe {
+    fn enable_event_type(&self, ev_type: &EventType) -> Result<()> {
+        try_errno!(unsafe {
             raw::libevdev_enable_event_type(self.raw,
                                             ev_type.clone() as c_uint)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
-    fn enable_event_code(&self, ev_code: &EventCode, data: &Any)
-                         -> Result<(), Errno> {
+    fn enable_event_code(&self, ev_code: &EventCode, data: &Any) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(ev_code);
 
-        let result = unsafe {
+        try_errno!(unsafe {
             raw::libevdev_enable_event_code(self.raw,
                                             ev_type as c_uint,
                                             ev_code as c_uint,
                                             data as *const _ as *const c_void)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
     /// Forcibly disable an EventType/EventCode on this device, even if the
@@ -633,13 +607,13 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    pub fn disable(&self, blob: &Any) -> Result<(),Errno> {
+    pub fn disable(&self, blob: &Any) -> Result<()> {
         if let Some(ev_type) = blob.downcast_ref::<EventType>() {
             self.disable_event_type(ev_type)
         } else if let Some(ev_code) = blob.downcast_ref::<EventCode>() {
             self.disable_event_code(ev_code)
         } else {
-            Err(Errno::from_i32(-1))
+            Err(Error::InvalidAny)
         }
     }
 
@@ -657,17 +631,15 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    fn disable_event_type(&self, ev_type: &EventType) -> Result<(), Errno> {
-         let result = unsafe {
+    fn disable_event_type(&self, ev_type: &EventType) -> Result<()> {
+        try_errno!(unsafe {
             raw::libevdev_disable_event_type(self.raw,
                                              ev_type.clone() as c_uint)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
+
     /// Forcibly disable an event code on this device, even if the underlying
     /// device provides it. This effectively mutes the respective set of
     /// events. libevdev will filter any events matching this type and code and
@@ -682,24 +654,20 @@ impl Device {
     ///
     /// Disabling codes of type EV_SYN will not work. Don't shoot yourself in the
     /// foot. It hurts.
-    fn disable_event_code(&self, code: &EventCode)
-                              -> Result<(), Errno> {
+    fn disable_event_code(&self, code: &EventCode) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(code);
-        let result = unsafe {
+        try_errno!(unsafe {
             raw::libevdev_disable_event_code(self.raw,
-                                            ev_type,
-                                            ev_code)
-        };
+                                             ev_type,
+                                             ev_code)
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
     /// Set the device's EV_ABS axis to the value defined in the abs
     /// parameter. This will be written to the kernel.
-    pub fn set_kernel_abs_info(&self, code: &EventCode, absinfo: &AbsInfo) {
+    pub fn set_kernel_abs_info(&self, code: &EventCode, absinfo: &AbsInfo) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
         let absinfo = raw::input_absinfo {
                         value: absinfo.value,
@@ -710,28 +678,25 @@ impl Device {
                         resolution: absinfo.resolution,
                       };
 
-        unsafe {
+        try_errno!(unsafe {
             raw::libevdev_kernel_set_abs_info(self.raw, ev_code,
-                                              &absinfo as *const _);
-        }
+                                              &absinfo as *const _)
+        });
+        Ok(())
     }
 
     /// Turn an LED on or off.
     ///
     /// enabling an LED requires write permissions on the device's file descriptor.
-    pub fn kernel_set_led_value(&self, code: &EventCode, value: LedState)
-                                 -> Result<(), Errno> {
+    pub fn kernel_set_led_value(&self, code: &EventCode, value: LedState) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
-        let result = unsafe {
+        try_errno!(unsafe {
             raw::libevdev_kernel_set_led_value(self.raw,
                                                ev_code,
                                                value as c_int)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
     /// Set the clock ID to be used for timestamps. Further events from this device
@@ -739,16 +704,13 @@ impl Device {
     ///
     /// This is a modification only affecting this representation of
     /// this device.
-    pub fn set_clock_id(&self, clockid: i32) -> Result<(), Errno> {
-         let result = unsafe {
+    pub fn set_clock_id(&self, clockid: i32) -> Result<()> {
+        try_errno!(unsafe {
             raw::libevdev_set_clock_id(self.raw,
                                        clockid as c_int)
-        };
+        });
 
-        match result {
-            0 => Ok(()),
-            error => Err(Errno::from_i32(-error))
-        }
+        Ok(())
     }
 
     /// Get the next event from the device. This function operates in two different
@@ -778,7 +740,7 @@ impl Device {
     /// This triggers an internal sync of the device and `next_event` returns
     /// `ReadStatus::Sync`.
     pub fn next_event(&self, flags: ReadFlag)
-                      -> Result<(ReadStatus, InputEvent), Errno> {
+                      -> Result<(ReadStatus, InputEvent)> {
         let mut ev = raw::input_event {
             time: raw::timeval {
                 tv_sec: 0,
@@ -806,7 +768,7 @@ impl Device {
         match result {
             raw::LIBEVDEV_READ_STATUS_SUCCESS => Ok((ReadStatus::Success, event)),
             raw::LIBEVDEV_READ_STATUS_SYNC => Ok((ReadStatus::Sync, event)),
-            error => Err(Errno::from_i32(-error)),
+            error => Error::errno_from_i32(-error),
         }
     }
 }

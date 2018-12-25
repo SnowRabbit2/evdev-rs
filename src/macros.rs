@@ -1,3 +1,10 @@
+macro_rules! try_errno {
+    ($e:expr) => {{
+        let result = $e;
+        if result != 0 { return Error::errno_from_i32(-result); }
+    }};
+}
+
 macro_rules! string_getter {
     ( $( $func_name:ident, $c_func: ident ),* ) => {
         $(
@@ -50,14 +57,13 @@ macro_rules! product_setter {
 macro_rules! abs_getter {
     ( $( $func_name:ident, $c_func: ident ),* ) => {
         $(
-            pub fn $func_name (&self,
-                               code: u32) -> Result<i32, nix::errno::Errno> {
+            pub fn $func_name (&self, code: u32) -> Result<i32> {
                 let result = unsafe {
                     raw::$c_func(self.raw, code as c_uint) as i32
                 };
 
                 match result {
-                    0 => Err(nix::errno::from_i32(0)),
+                    0 => Err(Error::InvalidAxis),
                     k => Ok(k)
                 }
             }
