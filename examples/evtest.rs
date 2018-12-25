@@ -117,7 +117,7 @@ fn main() {
     let f = File::open(path).unwrap();
 
     let mut d = Device::new().unwrap();
-    d.set_fd(&f).unwrap();
+    d.set_file_owning(f).unwrap();
 
     println!("Input device ID: bus 0x{:x} vendor 0x{:x} product 0x{:x}",
 			d.bustype(),
@@ -131,7 +131,7 @@ fn main() {
     print_bits(&d);
     print_props(&d);
 
-    let mut a: Result<(ReadStatus, InputEvent), Errno>;
+    let mut a: Result<(ReadStatus, InputEvent)>;
     loop {
         a = d.next_event(evdev::NORMAL | evdev::BLOCKING);
         if a.is_ok() {
@@ -154,9 +154,9 @@ fn main() {
             }
         } else {
             match a.err().unwrap() {
-                Errno::EAGAIN => continue,
+                Error::Errno(Errno::EAGAIN) => continue,
                 err => {
-                    println!("{}", err);
+                    println!("{:?}", err);
                     break;
                 }
             }

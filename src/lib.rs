@@ -152,6 +152,7 @@ pub struct InputEvent {
     pub value: i32,
 }
 
+#[derive(Debug)]
 pub enum Error {
     Errno(nix::errno::Errno),
     InvalidAny,
