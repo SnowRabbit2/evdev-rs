@@ -54,10 +54,10 @@ pub mod util;
 #[macro_use]
 mod macros;
 
-use libc::{c_char, c_int, c_long, c_uint, c_void};
+use libc::{c_int, c_long, c_uint, c_void};
 use nix::errno::Errno;
 use std::any::Any;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
@@ -149,24 +149,6 @@ pub struct InputEvent {
     pub event_code: EventCode,
     pub value: i32,
 }
-
-fn ptr_to_str(ptr: *const c_char) -> Option<&'static str> {
-    let slice : Option<&CStr> = unsafe {
-        if ptr.is_null() {
-            return None
-        }
-        Some(CStr::from_ptr(ptr))
-    };
-
-    match slice {
-        None => None,
-        Some(s) => {
-            let buf : &[u8] = s.to_bytes();
-            Some(std::str::from_utf8(buf).unwrap())
-        }
-    }
-}
-
 
 impl Device {
     /// Initialize a new libevdev device.

@@ -1,9 +1,25 @@
 use enums::*;
-use libc::c_uint;
+use libc::{c_char, c_uint};
 use raw;
 use std::fmt;
-use std::ffi::CString;
-use ptr_to_str;
+use std::ffi::{CStr, CString};
+
+pub(crate) fn ptr_to_str(ptr: *const c_char) -> Option<&'static str> {
+    let slice : Option<&CStr> = unsafe {
+        if ptr.is_null() {
+            return None
+        }
+        Some(CStr::from_ptr(ptr))
+    };
+
+    match slice {
+        None => None,
+        Some(s) => {
+            let buf : &[u8] = s.to_bytes();
+            Some(std::str::from_utf8(buf).unwrap())
+        }
+    }
+}
 
 pub struct EventTypeIterator {
     current: EventType
