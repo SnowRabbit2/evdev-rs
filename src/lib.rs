@@ -150,7 +150,6 @@ pub struct TimeVal {
 pub struct InputEvent {
     /// The time at which event occured
     pub time: TimeVal,
-    pub event_type: EventType,
     pub event_code: EventCode,
     pub value: i32,
 }
@@ -810,7 +809,7 @@ impl Device {
     /// `ReadStatus::Sync`.
     pub fn next_event(&self, flags: ReadFlag)
                       -> Result<(ReadStatus, InputEvent)> {
-        let mut ev = raw::input_event {
+        let mut raw = raw::input_event {
             time: raw::timeval {
                 tv_sec: 0,
                 tv_usec: 0,
@@ -821,18 +820,10 @@ impl Device {
         };
 
         let result = unsafe {
-            raw::libevdev_next_event(self.raw, flags.bits as c_uint, &mut ev)
+            raw::libevdev_next_event(self.raw, flags.bits as c_uint, &mut raw)
         };
 
-        let event = InputEvent {
-            time: TimeVal {
-                tv_sec: ev.time.tv_sec,
-                tv_usec: ev.time.tv_usec,
-            },
-            event_type: int_to_event_type(ev.event_type as u32).unwrap(),
-            event_code: int_to_event_code(ev.event_type as u32, ev.event_code as u32).unwrap(),
-            value: ev.value,
-        };
+        let event = InputEvent::from_raw(raw);
 
         match result {
             raw::LIBEVDEV_READ_STATUS_SUCCESS => Ok((ReadStatus::Success, event)),
@@ -843,6 +834,17 @@ impl Device {
 }
 
 impl InputEvent {
+    fn from_raw(raw: raw::input_event) -> InputEvent {
+        InputEvent {
+            time: TimeVal {
+                tv_sec: raw.time.tv_sec,
+                tv_usec: raw.time.tv_usec,
+            },
+            code:  int_to_event_code(raw.event_type as u32, raw.event_code as u32).unwrap(),
+            value: raw.value,
+        }
+    }
+
     fn as_raw(&self) -> raw::input_event {
         let (ev_type, ev_code) = event_code_to_int(self.event_code);
         raw::input_event {
