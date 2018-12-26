@@ -1,3 +1,4 @@
+use nix::libc;
 use nix::libc::c_int;
 use std::fs::File;
 use std::os::unix::io::{RawFd, AsRawFd, FromRawFd, IntoRawFd};
@@ -52,7 +53,7 @@ impl Device {
     pub fn file_clone(&self) -> Result<File> {
         unsafe {
             let fd = raw::libevdev_uinput_get_fd(self.raw);
-            let newfd = nix::libc::dup(fd);
+            let newfd = libc::dup(fd);
             if newfd < 0 {
                 Error::errno_from_i32(nix::errno::errno())
             }

@@ -42,11 +42,10 @@
 
 extern crate evdev_sys as raw;
 extern crate nix;
-extern crate libc;
 #[macro_use]
 extern crate bitflags;
-#[macro_use]
-extern crate log;
+//#[macro_use]
+//extern crate log;
 
 pub mod enums;
 pub mod logging;
@@ -55,7 +54,8 @@ pub mod util;
 mod macros;
 pub mod uinput;
 
-use libc::{c_int, c_long, c_uint, c_void};
+use nix::libc;
+use nix::libc::{c_int, c_long, c_uint, c_void};
 use nix::errno::Errno;
 use std::any::Any;
 use std::ffi::CString;
@@ -73,16 +73,16 @@ pub enum GrabMode {
 }
 
 bitflags! {
-    pub flags ReadFlag: u32 {
+    pub struct ReadFlag: u32 {
         /// Process data in sync mode
-        const SYNC = 1,
+        const SYNC = 1;
         /// Process data in normal mode
-        const NORMAL = 2,
+        const NORMAL = 2;
         /// Pretend the next event is a SYN_DROPPED and require the
         /// caller to sync
-        const FORCE_SYNC = 4,
+        const FORCE_SYNC = 4;
         /// The fd is not in O_NONBLOCK and a read may block
-        const BLOCKING = 8,
+        const BLOCKING = 8;
     }
 }
 
@@ -263,7 +263,7 @@ impl Device {
     pub fn file_clone(&self) -> Option<Result<File>> {
         unsafe {
             self.fd().map(|fd| {
-                let newfd = nix::libc::dup(fd);
+                let newfd = libc::dup(fd);
                 if newfd < 0 {
                     Error::errno_from_i32(nix::errno::errno())
                 }

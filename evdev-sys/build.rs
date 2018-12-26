@@ -1,5 +1,4 @@
 extern crate pkg_config;
-extern crate gcc;
 
 use std::env;
 use std::ffi::OsString;
@@ -37,7 +36,7 @@ fn main() {
     println!("cargo:rerun-if-changed=libevdev/autogen.sh");
 
     println!("cargo:rustc-link-lib=static=evdev");
-    let cfg = gcc::Build::new();
+    let cfg = cc::Build::new();
     let compiler = cfg.get_compiler();
 
     let _ = fs::create_dir(&dst.join("build"));

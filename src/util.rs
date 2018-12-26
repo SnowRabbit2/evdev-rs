@@ -1,5 +1,5 @@
 use enums::*;
-use libc::{c_char, c_uint};
+use nix::libc::{c_char, c_uint};
 use raw;
 use std::fmt;
 use std::ffi::{CStr, CString};
@@ -82,7 +82,7 @@ pub fn event_code_to_int(event_code: &EventCode) -> (c_uint, c_uint) {
             ev_code = code as c_uint;
         },
         _ => {
-            warn!("Event code not found");
+            println!("Event code not found");
         }
     }
 
