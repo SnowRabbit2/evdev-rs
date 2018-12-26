@@ -33,10 +33,10 @@ pub struct InputPropIterator {
     current: InputProp
 }
 
-pub fn event_code_to_int(event_code: &EventCode) -> (c_uint, c_uint) {
+pub fn event_code_to_int(event_code: EventCode) -> (c_uint, c_uint) {
     let mut ev_type: c_uint = 0;
     let mut ev_code: c_uint = 0;
-    match event_code.clone() {
+    match event_code {
         EventCode::EV_SYN(code) => {
             ev_type = EventType::EV_SYN as c_uint;
             ev_code = code as c_uint;
@@ -154,7 +154,7 @@ impl fmt::Display for EventType {
 
 impl fmt::Display for EventCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (ev_type, ev_code) = event_code_to_int(self);
+        let (ev_type, ev_code) = event_code_to_int(*self);
         write!(f, "{}", ptr_to_str(unsafe {
             raw::libevdev_event_code_get_name(ev_type, ev_code)
         }).unwrap_or(""))
@@ -210,7 +210,7 @@ impl EventCode {
     /// prefix followed by their name (eg., "ABS_X"). The prefix must be included in
     /// the name. It returns the constant assigned to the event code or Errno if not
     /// found.
-    pub fn from_str(ev_type: &EventType, name: &str) -> Option<EventCode> {
+    pub fn from_str(ev_type: EventType, name: &str) -> Option<EventCode> {
         let name = CString::new(name).unwrap();
         let result = unsafe {
             raw::libevdev_event_code_from_name(ev_type.clone() as c_uint, name.as_ptr())

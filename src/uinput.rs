@@ -66,7 +66,7 @@ impl Device {
     string_getter!(syspath, libevdev_uinput_get_syspath,
                    devnode, libevdev_uinput_get_devnode);
 
-    pub fn write_event(&self, code: &EventCode, val: i32) -> Result<()> {
+    pub fn write_event(&self, code: EventCode, val: i32) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(code);
         try_errno!(unsafe {
             raw::libevdev_uinput_write_event(self.raw,

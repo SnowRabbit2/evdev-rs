@@ -16,7 +16,7 @@ fn print_abs_bits(dev: &Device, axis: &EV_ABS) {
 
 	if !dev.has(&code) { return; }
 
-	let abs = dev.abs_info(&code).unwrap();
+	let abs = dev.abs_info(code).unwrap();
 
 	println!("	Value	{}", abs.value);
 	println!("	Min	{}", abs.minimum);
@@ -133,7 +133,7 @@ fn main() {
 
     let mut a: Result<(ReadStatus, InputEvent)>;
     loop {
-        a = d.next_event(evdev::NORMAL | evdev::BLOCKING);
+        a = d.next_event(evdev::ReadFlag::NORMAL | evdev::ReadFlag::BLOCKING);
         if a.is_ok() {
             let mut result = a.ok().unwrap();
             match result.0 {
@@ -141,7 +141,7 @@ fn main() {
                     println!("::::::::::::::::::::: dropped ::::::::::::::::::::::");
                     while result.0 == ReadStatus::Sync {
                         print_sync_dropped_event(&result.1);
-                        a = d.next_event(evdev::SYNC);
+                        a = d.next_event(evdev::ReadFlag::SYNC);
                         if a.is_ok() {
                             result = a.ok().unwrap();
                         } else {

@@ -357,7 +357,7 @@ impl Device {
     ///
     /// Returns the `AbsInfo` for the given the code or None if the device
     /// doesn't support this code
-    pub fn abs_info(&self, code: &EventCode) -> Option<AbsInfo> {
+    pub fn abs_info(&self, code: EventCode) -> Option<AbsInfo> {
         let (_, ev_code) = event_code_to_int(code);
         let a = unsafe {
             raw::libevdev_get_abs_info(self.raw, ev_code)
@@ -384,7 +384,7 @@ impl Device {
     ///
     /// This function has no effect if `has_event_code` returns false for
     /// this code.
-    pub fn set_abs_info(&self, code: &EventCode, absinfo: &AbsInfo) {
+    pub fn set_abs_info(&self, code: EventCode, absinfo: &AbsInfo) {
         let (_, ev_code) = event_code_to_int(code);
         let absinfo = raw::input_absinfo {
                         value: absinfo.value,
@@ -404,11 +404,11 @@ impl Device {
     /// Returns `true` if device support the InputProp/EventType/EventCode and false otherwise
     pub fn has(&self, blob: &Any) -> bool {
         if let Some(ev_type) = blob.downcast_ref::<EventType>() {
-            self.has_event_type(ev_type)
+            self.has_event_type(*ev_type)
         } else if let Some(ev_code) = blob.downcast_ref::<EventCode>() {
-            self.has_event_code(ev_code)
+            self.has_event_code(*ev_code)
         } else if let Some(prop) = blob.downcast_ref::<InputProp>() {
-            self.has_property(prop)
+            self.has_property(*prop)
         } else {
             false
         }
@@ -422,25 +422,25 @@ impl Device {
     /// this device.
     pub fn enable(&self, blob: &Any) -> Result<()> {
         if let Some(ev_type) = blob.downcast_ref::<EventType>() {
-            self.enable_event_type(ev_type)
+            self.enable_event_type(*ev_type)
         } else if let Some(ev_code) = blob.downcast_ref::<EventCode>() {
-            self.enable_event_code(ev_code, &0)
+            self.enable_event_code(*ev_code, &0)
         } else if let Some(prop) = blob.downcast_ref::<InputProp>() {
-            self.enable_property(prop)
+            self.enable_property(*prop)
         } else {
             Err(Error::InvalidAny)
         }
     }
 
     /// Returns `true` if device support the property and false otherwise
-    fn has_property(&self, prop: &InputProp) -> bool {
+    pub fn has_property(&self, prop: InputProp) -> bool {
         unsafe {
             raw::libevdev_has_property(self.raw, prop.clone() as c_uint) != 0
         }
     }
 
     /// Enables this property, a call to `set_fd` will overwrite any previously set values
-    fn enable_property(&self, prop: &InputProp) -> Result<()> {
+    pub fn enable_property(&self, prop: InputProp) -> Result<()> {
         try_errno!(unsafe {
             raw::libevdev_enable_property(self.raw, prop.clone() as c_uint) as i32
         });
@@ -449,14 +449,14 @@ impl Device {
     }
 
     /// Returns `true` is the device support this event type and `false` otherwise
-    fn has_event_type(&self, ev_type: &EventType) -> bool {
+    pub fn has_event_type(&self, ev_type: EventType) -> bool {
         unsafe {
             raw::libevdev_has_event_type(self.raw, ev_type.clone() as c_uint) != 0
         }
     }
 
     /// Return `true` is the device support this event type and code and `false` otherwise
-    fn has_event_code(&self, code: &EventCode) -> bool {
+    pub fn has_event_code(&self, code: EventCode) -> bool {
         unsafe {
             let (ev_type, ev_code) = event_code_to_int(code);
             raw::libevdev_has_event_code(self.raw,
@@ -469,7 +469,7 @@ impl Device {
     ///
     /// If the device supports this event type and code, the return value is
     /// set to the current value of this axis. Otherwise, `None` is returned.
-    pub fn event_value(&self, code: &EventCode) -> Option<i32> {
+    pub fn event_value(&self, code: EventCode) -> Option<i32> {
         let mut value: i32 = 0;
         let (ev_type, ev_code) = event_code_to_int(code);
         let valid = unsafe {
@@ -501,7 +501,7 @@ impl Device {
     /// If the device supports ABS_MT_SLOT and the type is EV_ABS and the code is
     /// ABS_MT_SLOT, the value must be a positive number less then the number of
     /// slots on the device. Otherwise, `set_event_value` returns Err.
-    pub fn set_event_value(&self, code: &EventCode, val: i32) -> Result<()> {
+    pub fn set_event_value(&self, code: EventCode, val: i32) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(code);
         try_errno!(unsafe {
             raw::libevdev_set_event_value(self.raw,
@@ -565,7 +565,7 @@ impl Device {
     /// If the device supports this event code, the return value is
     /// is set to the current value of this axis. Otherwise, or
     /// if the event code is not an ABS_MT_* event code, `None` is returned
-    pub fn slot_value(&self, slot: u32, code: &EventCode) -> Option<i32> {
+    pub fn slot_value(&self, slot: u32, code: EventCode) -> Option<i32> {
         let (_, ev_code) = event_code_to_int(code);
         let mut value: i32 = 0;
         let valid = unsafe {
@@ -589,7 +589,7 @@ impl Device {
     ///
     /// This function does not set event values for axes outside the ABS_MT range,
     /// use `set_event_value` instead.
-    pub fn set_slot_value(&self, slot: u32, code: &EventCode, val: i32) -> Result<()> {
+    pub fn set_slot_value(&self, slot: u32, code: EventCode, val: i32) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
         try_errno!(unsafe {
             raw::libevdev_set_slot_value(self.raw,
@@ -643,7 +643,7 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    fn enable_event_type(&self, ev_type: &EventType) -> Result<()> {
+    pub fn enable_event_type(&self, ev_type: EventType) -> Result<()> {
         try_errno!(unsafe {
             raw::libevdev_enable_event_type(self.raw,
                                             ev_type.clone() as c_uint)
@@ -652,7 +652,7 @@ impl Device {
         Ok(())
     }
 
-    fn enable_event_code(&self, ev_code: &EventCode, data: &Any) -> Result<()> {
+    pub fn enable_event_code(&self, ev_code: EventCode, data: &Any) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(ev_code);
 
         try_errno!(unsafe {
@@ -679,9 +679,9 @@ impl Device {
     /// this device.
     pub fn disable(&self, blob: &Any) -> Result<()> {
         if let Some(ev_type) = blob.downcast_ref::<EventType>() {
-            self.disable_event_type(ev_type)
+            self.disable_event_type(*ev_type)
         } else if let Some(ev_code) = blob.downcast_ref::<EventCode>() {
-            self.disable_event_code(ev_code)
+            self.disable_event_code(*ev_code)
         } else {
             Err(Error::InvalidAny)
         }
@@ -701,10 +701,9 @@ impl Device {
     ///
     /// This is a local modification only affecting only this representation of
     /// this device.
-    fn disable_event_type(&self, ev_type: &EventType) -> Result<()> {
+    pub fn disable_event_type(&self, ev_type: EventType) -> Result<()> {
         try_errno!(unsafe {
-            raw::libevdev_disable_event_type(self.raw,
-                                             ev_type.clone() as c_uint)
+            raw::libevdev_disable_event_type(self.raw, ev_type as c_uint)
         });
 
         Ok(())
@@ -724,7 +723,7 @@ impl Device {
     ///
     /// Disabling codes of type EV_SYN will not work. Don't shoot yourself in the
     /// foot. It hurts.
-    fn disable_event_code(&self, code: &EventCode) -> Result<()> {
+    pub fn disable_event_code(&self, code: EventCode) -> Result<()> {
         let (ev_type, ev_code) = event_code_to_int(code);
         try_errno!(unsafe {
             raw::libevdev_disable_event_code(self.raw,
@@ -737,7 +736,7 @@ impl Device {
 
     /// Set the device's EV_ABS axis to the value defined in the abs
     /// parameter. This will be written to the kernel.
-    pub fn set_kernel_abs_info(&self, code: &EventCode, absinfo: &AbsInfo) -> Result<()> {
+    pub fn set_kernel_abs_info(&self, code: EventCode, absinfo: &AbsInfo) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
         let absinfo = raw::input_absinfo {
                         value: absinfo.value,
@@ -758,7 +757,7 @@ impl Device {
     /// Turn an LED on or off.
     ///
     /// enabling an LED requires write permissions on the device's file descriptor.
-    pub fn kernel_set_led_value(&self, code: &EventCode, value: LedState) -> Result<()> {
+    pub fn kernel_set_led_value(&self, code: EventCode, value: LedState) -> Result<()> {
         let (_, ev_code) = event_code_to_int(code);
         try_errno!(unsafe {
             raw::libevdev_kernel_set_led_value(self.raw,
@@ -844,36 +843,32 @@ impl Device {
 }
 
 impl InputEvent {
-    pub fn is_type(&self, ev_type: &EventType) -> bool {
-        let ev = raw::input_event {
+    fn as_raw(&self) -> raw::input_event {
+        let (ev_type, ev_code) = event_code_to_int(self.event_code);
+        raw::input_event {
             time: raw::timeval {
                 tv_sec: self.time.tv_sec,
                 tv_usec: self.time.tv_usec,
             },
-            event_type: self.event_type.clone() as u16,
-            event_code: event_code_to_int(&self.event_code).1 as u16,
+            event_type: ev_type as u16,
+            event_code: ev_code as u16,
             value: self.value,
-        };
+        }
+    }
 
+    pub fn is_type(&self, ev_type: EventType) -> bool {
+        let ev = self.as_raw();
         unsafe {
             raw::libevdev_event_is_type(&ev, ev_type.clone() as c_uint) == 1
         }
     }
 
-    pub fn is_code(&self, code: &EventCode) -> bool {
-        let (ev_type, ev_code) = event_code_to_int(code);
-        let ev = raw::input_event {
-            time: raw::timeval {
-                tv_sec: self.time.tv_sec,
-                tv_usec: self.time.tv_usec,
-            },
-            event_type: self.event_type.clone() as u16,
-            event_code: event_code_to_int(&self.event_code).1 as u16,
-            value: self.value,
-        };
-
+    pub fn is_code(&self, code: EventCode) -> bool {
+        let ev = self.as_raw();
+        let (check_type, check_code) = event_code_to_int(code);
+        
         unsafe {
-            raw::libevdev_event_is_code(&ev, ev_type, ev_code) == 1
+            raw::libevdev_event_is_code(&ev, check_type, check_code) == 1
         }
     }
 }
