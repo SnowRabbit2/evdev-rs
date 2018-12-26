@@ -46,6 +46,9 @@ extern crate nix;
 extern crate bitflags;
 //#[macro_use]
 //extern crate log;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 
 pub mod enums;
 pub mod logging;
