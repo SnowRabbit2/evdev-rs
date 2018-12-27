@@ -4,7 +4,7 @@
 
 extern crate libc;
 
-use libc::{c_int, c_uint, c_char, c_void, c_long, size_t, uint16_t};
+use libc::{c_int, c_uint, c_char, c_void, size_t, uint16_t};
 
 pub type __enum_ty = libc::c_int;
 pub type libevdev_read_flag = __enum_ty;
@@ -52,14 +52,8 @@ pub struct va_list {
 }
 
 #[repr(C)]
-pub struct timeval {
-    pub tv_sec: c_long,
-    pub tv_usec: c_long,
-}
-
-#[repr(C)]
 pub struct input_event {
-    pub time: timeval,
+    pub time: libc::timeval,
     pub event_type: uint16_t,
     pub event_code: uint16_t,
     pub value: c_int,

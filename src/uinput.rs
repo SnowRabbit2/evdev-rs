@@ -4,7 +4,7 @@ use std::fs::File;
 use std::os::unix::io::{RawFd, AsRawFd, FromRawFd, IntoRawFd};
 
 use raw;
-use enums::*;
+use event::*;
 use util::*;
 use super::{Device as EvDevice, Error, Result};
 
@@ -66,13 +66,10 @@ impl Device {
     string_getter!(syspath, libevdev_uinput_get_syspath,
                    devnode, libevdev_uinput_get_devnode);
 
-    pub fn write_event(&self, code: EventCode, val: i32) -> Result<()> {
-        let (ev_type, ev_code) = event_code_to_int(code);
+    pub fn write_event<C: AsCodeRaw>(&self, code: C, value: i32) -> Result<()> {
+        let (ev_type, ev_code) = code.as_code_raw();
         try_errno!(unsafe {
-            raw::libevdev_uinput_write_event(self.raw,
-                                             ev_type,
-                                             ev_code,
-                                             val as c_int)
+            raw::libevdev_uinput_write_event(self.raw, ev_type, ev_code, value as c_int)
         });
 
         Ok(())
