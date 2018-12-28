@@ -1,5 +1,6 @@
 use nix::libc;
 use nix::libc::c_int;
+use nix::errno::Errno;
 use std::fs::File;
 use std::os::unix::io::{RawFd, AsRawFd, FromRawFd, IntoRawFd};
 
@@ -55,7 +56,7 @@ impl Device {
             let fd = raw::libevdev_uinput_get_fd(self.raw);
             let newfd = libc::dup(fd);
             if newfd < 0 {
-                Error::errno_from_i32(nix::errno::errno())
+                Err(Error::Errno(Errno::last()))
             }
             else {
                 Ok(File::from_raw_fd(newfd))

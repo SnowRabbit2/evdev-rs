@@ -141,15 +141,9 @@ pub struct Device {
 
 #[derive(Debug)]
 pub enum Error {
+    Unspecified,
     Errno(nix::errno::Errno),
-    InvalidAny,
-    InvalidAxis,
-}
-
-impl Error {
-    fn errno_from_i32<R>(errno: i32) -> Result<R> {
-        Err(Error::Errno(Errno::from_i32(errno)))
-    }
+    NotAnAxis,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -166,7 +160,8 @@ impl Device {
 
         if libevdev.is_null() {
             None
-        } else {
+        }
+        else {
             Some(Device {
                 raw: libevdev,
                 owning: false
@@ -184,15 +179,17 @@ impl Device {
 
     /// Initialize a new libevdev device from the given IntoRawFd.
     ///
-    /// This is a shortcut for
+    /// The Device instance takes ownership of the file descriptor,
+    /// the file descriptor will be close when the Device instance goes out of scope.
+    /// See new_from_file_borrowing for a borrowing version.
+    /// 
+    /// This is essentially a shortcut for
     ///
     /// ```
     /// use evdev_rs::Device;
-    /// # use std::fs::File;
     ///
     /// let mut device = Device::new().unwrap();
-    /// # let fd = File::open("/dev/input/event0").unwrap();
-    /// device.set_fd(&fd);
+    /// device.set_file_owning(file);
     /// ```
     pub fn new_from_file_owning<F: IntoRawFd>(file: F) -> Result<Device> {
         Self::new_from_fd(file.into_raw_fd(), true)
@@ -200,15 +197,17 @@ impl Device {
 
     /// Initialize a new libevdev device from the given AsRawFd.
     ///
-    /// This is a shortcut for
+    /// The Device instance does not takes ownership of the file descriptor,
+    /// the file descriptor will not be close when the Device instance goes out of scope.
+    /// See new_from_file_owning for a version taking ownership.
+    ///     
+    /// This is a essentally a shortcut for
     ///
     /// ```
     /// use evdev_rs::Device;
-    /// # use std::fs::File;
     ///
     /// let mut device = Device::new().unwrap();
-    /// # let fd = File::open("/dev/input/event0").unwrap();
-    /// device.set_fd(&fd);
+    /// device.set_file_borrowing(&file);
     /// ```
     pub fn new_from_file_borrowing<F: AsRawFd>(file: &F) -> Result<Device> {
         Self::new_from_fd(file.as_raw_fd(), false)
@@ -223,36 +222,43 @@ impl Device {
 
     /// Returns the file descriptor associated with the device
     ///
-    /// if the file descriptor hasn't been set yet then it return `None`
+    /// If the file descriptor hasn't been set yet then it return `None`
+    /// 
+    /// This function is marked as unsafe has it returns the file descriptor
+    /// independently of the fact that it is owned by the device instance or not.
+    /// Use with care.
     pub unsafe fn fd(&self) -> Option<RawFd> {
-        let result = raw::libevdev_get_fd(self.raw);
-
-        if result == 0 {
-            None
-        } else {
-            let f = result;
-            Some(f)
+        match raw::libevdev_get_fd(self.raw) {
+            0  => None,
+            fd => Some(fd)
         }
     }
 
     /// Consumes this Device instance and returns the associated file
     ///
-    /// if the file descriptor hasn't been set yet then it return `None`
+    /// If the file has not been set as owned by the Device instance
+    /// (using new_from_file_owning or set_file_owning) then it return `None`
     pub fn into_file(self) -> Option<File> {
-        unsafe {
-            self.fd().map(|fd| File::from_raw_fd(fd))
+        if self.owning {
+            unsafe {
+                self.fd().map(|fd| File::from_raw_fd(fd))
+            }
+        }
+        else {
+            None
         }
     }
 
-    /// Returns a (dup'd, rc'd) clone the associated file
+    /// Returns a (dup'd) clone of the associated file
     ///
-    /// if the file descriptor hasn't been set yet then it return `None`
+    /// If the file has not been set (using new_from_file_* or set_file_*)
+    /// then it return `None`
     pub fn file_clone(&self) -> Option<Result<File>> {
         unsafe {
             self.fd().map(|fd| {
                 let newfd = libc::dup(fd);
                 if newfd < 0 {
-                    Error::errno_from_i32(nix::errno::errno())
+                    Err(Error::Errno(Errno::last()))
                 }
                 else {
                     Ok(File::from_raw_fd(newfd))
@@ -262,7 +268,9 @@ impl Device {
     }
 
     fn set_fd(&mut self, fd: RawFd, owning: bool) -> Result<()> {
-        try_errno!(unsafe { raw::libevdev_set_fd(self.raw, fd) });
+        try_errno!(unsafe {
+            raw::libevdev_set_fd(self.raw, fd)
+        });
         self.owning = owning;
         Ok(())
     }
@@ -270,9 +278,12 @@ impl Device {
     /// Set the file for this struct and initialize internal data.
     ///
     /// This function may only be called once per device. If the device changed and
-    /// you need to re-read a device, use `new` method. If you need to change the file after
-    /// closing and re-opening the same device, use `change_fd`.
+    /// you need to re-read a device, use `new` method.
     ///
+    /// The Device instance takes ownership of the file descriptor,
+    /// the file descriptor will be close when the Device instance goes out of scope.
+    /// See set_file_borrowing for a borrowing version.
+    /// 
     /// Unless otherwise specified, evdev function behavior is undefined until
     /// a successfull call to `set_fd`.
     pub fn set_file_owning<F: IntoRawFd>(&mut self, file: F) -> Result<()> {
@@ -284,7 +295,11 @@ impl Device {
     /// This function may only be called once per device. If the device changed and
     /// you need to re-read a device, use `new` method. If you need to change the file after
     /// closing and re-opening the same device, use `change_fd`.
-    ///
+    /// 
+    /// The Device instance does not takes ownership of the file descriptor,
+    /// the file descriptor will not be close when the Device instance goes out of scope.
+    /// See set_file_owning for a version taking ownership.
+    /// 
     /// Unless otherwise specified, evdev function behavior is undefined until
     /// a successfull call to `set_fd`.
     pub fn set_file_borrowing<F: AsRawFd>(&mut self, file: &F) -> Result<()> {
@@ -301,6 +316,9 @@ impl Device {
     /// evdev device does not sync itself after changing the fd and keeps the current
     /// device state. Use next_event with the FORCE_SYNC flag to force a re-sync.
     ///
+    /// Note that this method only makes sense if the original file descriptor is
+    /// borrowed by the Device instance.
+    /// 
     /// # Example
     ///
     /// ```rust,ignore
@@ -318,8 +336,9 @@ impl Device {
             panic!("change_fd is not compatible with owned file")
         }
 
-        try_errno!(unsafe { raw::libevdev_change_fd(self.raw, f.as_raw_fd()) });
-        Ok(())
+        try_evdev!(unsafe {
+            raw::libevdev_change_fd(self.raw, f.as_raw_fd())
+        })
     }
 
     /// Grab or ungrab the device through a kernel EVIOCGRAB.
@@ -333,87 +352,68 @@ impl Device {
     /// client changes the file descriptor with libevdev_change_fd(), it must
     /// also re-issue a grab with libevdev_grab().
     pub fn grab(&mut self, grab: GrabMode) -> Result<()> {
-        try_errno!(unsafe { raw::libevdev_grab(self.raw, grab as c_int) });
+        try_errno!(unsafe {
+            raw::libevdev_grab(self.raw, grab as c_int)
+        });
         Ok(())
     }
 
     /// Get the axis info for the given axis, as advertised by the kernel.
     ///
-    /// Returns the `AbsInfo` for the given the code or None if the device
-    /// doesn't support this code
+    /// Returns the `AbsInfo` for the given the code or None if :
+    ///   * the code is not a valid EV_ABS code
+    ///   * the device doesn't support this code
     pub fn abs_info<C: AsCodeRaw>(&self, code: C) -> Option<AbsInfo> {
-        let (_, code) = code.as_code_raw();
-        let a = unsafe {
-            raw::libevdev_get_abs_info(self.raw, code)
-        };
+        let (r#type, code) = code.as_code_raw();
+        if Type::from_raw(r#type) != Type::ABS {
+            return None;
+        }
 
+        let a = unsafe {
+            raw::libevdev_get_abs_info(self.raw, code) 
+        };
         if a.is_null() {
             return None
         }
 
-        unsafe {
-            let absinfo = AbsInfo {
+        Some(unsafe {
+            AbsInfo {
                 value: (*a).value,
                 minimum: (*a).minimum,
                 maximum: (*a).maximum,
                 fuzz: (*a).fuzz,
                 flat: (*a).flat,
                 resolution: (*a).resolution,
-            };
-            Some(absinfo)
-        }
+            }
+        })
     }
 
     /// Change the abs info for the given EV_ABS event code, if the code exists.
     ///
-    /// This function has no effect if `has_event_code` returns false for
+    /// This function will succeed with no effect if `has_event_code` returns false for
     /// this code.
-    pub fn set_abs_info<C: AsCodeRaw>(&self, code: C, absinfo: &AbsInfo) {
-        let (_, code) = code.as_code_raw();
+    /// 
+    /// The code parameter must be a valid EV_ABS code or the function will returns an 
+    /// error.
+    pub fn set_abs_info<C: AsCodeRaw>(&self, code: C, absinfo: &AbsInfo) -> Result<()> {
+        let (r#type, code) = code.as_code_raw();
+        if Type::from_raw(r#type) != Type::ABS {
+            return Err(Error::NotAnAxis);
+        }
+
         let absinfo = raw::input_absinfo {
-                        value: absinfo.value,
-                        minimum: absinfo.minimum,
-                        maximum: absinfo.maximum,
-                        fuzz: absinfo.fuzz,
-                        flat: absinfo.flat,
-                        resolution: absinfo.resolution,
-                      };
-
+            value: absinfo.value,
+            minimum: absinfo.minimum,
+            maximum: absinfo.maximum,
+            fuzz: absinfo.fuzz,
+            flat: absinfo.flat,
+            resolution: absinfo.resolution,
+        };
         unsafe {
-            raw::libevdev_set_abs_info(self.raw, code,
-                                       &absinfo as *const _);
+            raw::libevdev_set_abs_info(self.raw, code, &absinfo as *const _);
         }
-    }
 
-    /// Returns `true` if device support the INPUT_PROP/Type/Code and false otherwise
-    pub fn has(&self, blob: &Any) -> bool {
-        if let Some(r#type) = blob.downcast_ref::<Type>() {
-            self.has_event_type(*r#type)
-        } else if let Some(code) = blob.downcast_ref::<Code>() {
-            self.has_event_code(*code)
-        } else if let Some(prop) = blob.downcast_ref::<INPUT_PROP>() {
-            self.has_property(*prop)
-        } else {
-            false
-        }
-    }
-
-    /// Forcibly enable an Type/INPUT_PROP on this device, even if the underlying
-    /// device does not support it. While this cannot make the device actually
-    /// report such events, it will now return true for has().
-    ///
-    /// This is a local modification only affecting only this representation of
-    /// this device.
-    pub fn enable(&self, blob: &Any) -> Result<()> {
-        if let Some(r#type) = blob.downcast_ref::<Type>() {
-            self.enable_event_type(*r#type)
-        } else if let Some(code) = blob.downcast_ref::<Code>() {
-            self.enable_event_code(*code, None)
-        } else if let Some(prop) = blob.downcast_ref::<INPUT_PROP>() {
-            self.enable_property(*prop)
-        } else {
-            Err(Error::InvalidAny)
-        }
+        Ok(())
     }
 
     /// Returns `true` if device support the property and false otherwise
@@ -425,11 +425,9 @@ impl Device {
 
     /// Enables this property, a call to `set_fd` will overwrite any previously set values
     pub fn enable_property(&self, prop: INPUT_PROP) -> Result<()> {
-        try_errno!(unsafe {
+        try_evdev!(unsafe {
             raw::libevdev_enable_property(self.raw, prop.as_raw()) as i32
-        });
-
-        Ok(())
+        })
     }
 
     /// Returns `true` is the device support this event type and `false` otherwise
@@ -441,11 +439,9 @@ impl Device {
 
     /// Return `true` is the device support this event type and code and `false` otherwise
     pub fn has_event_code<C: AsCodeRaw>(&self, code: C) -> bool {
+        let (r#type, code) = code.as_code_raw();
         unsafe {
-            let (r#type, code) = code.as_code_raw();
-            raw::libevdev_has_event_code(self.raw,
-                                         r#type,
-                                         code) != 0
+            raw::libevdev_has_event_code(self.raw, r#type, code) != 0
         }
     }
 
@@ -457,10 +453,7 @@ impl Device {
         let mut value: i32 = 0;
         let (r#type, code) = code.as_code_raw();
         let valid = unsafe {
-            raw::libevdev_fetch_event_value(self.raw,
-                                            r#type,
-                                            code ,
-                                            &mut value)
+            raw::libevdev_fetch_event_value(self.raw, r#type, code, &mut value)
         };
 
         match valid {
@@ -487,13 +480,9 @@ impl Device {
     /// slots on the device. Otherwise, `set_event_value` returns Err.
     pub fn set_event_value<C: AsCodeRaw>(&self, code: C, val: i32) -> Result<()> {
         let (r#type, code) = code.as_code_raw();
-        try_errno!(unsafe {
-            raw::libevdev_set_event_value(self.raw,
-                                          r#type,
-                                          code,
-                                          val as c_int)
-        });
-        Ok(())
+        try_evdev!(unsafe {
+            raw::libevdev_set_event_value(self.raw, r#type, code, val as c_int)
+        })
     }
 
     /// Check if there are events waiting for us.
@@ -553,10 +542,7 @@ impl Device {
         let (_, code) = code.as_code_raw();
         let mut value: i32 = 0;
         let valid = unsafe {
-            raw::libevdev_fetch_slot_value(self.raw,
-                                           slot as c_uint,
-                                           code,
-                                           &mut value)
+            raw::libevdev_fetch_slot_value(self.raw, slot as c_uint, code, &mut value)
         };
 
         match valid {
@@ -576,10 +562,7 @@ impl Device {
     pub fn set_slot_value<C: AsCodeRaw>(&self, slot: u32, code: C, val: i32) -> Result<()> {
         let (_, code) = code.as_code_raw();
         try_errno!(unsafe {
-            raw::libevdev_set_slot_value(self.raw,
-                                         slot as c_uint,
-                                         code,
-                                         val as c_int)
+            raw::libevdev_set_slot_value(self.raw, slot as c_uint, code, val as c_int)
         });
 
         Ok(())
@@ -628,11 +611,9 @@ impl Device {
     /// This is a local modification only affecting only this representation of
     /// this device.
     pub fn enable_event_type(&self, r#type: Type) -> Result<()> {
-        try_errno!(unsafe {
+        try_evdev!(unsafe {
             raw::libevdev_enable_event_type(self.raw, r#type.as_raw())
-        });
-
-        Ok(())
+        })
     }
 
     pub fn enable_event_code<C: AsCodeRaw>(&self, code: C, data: Option<&Any>) -> Result<()> {
@@ -642,35 +623,9 @@ impl Device {
             None => std::ptr::null(),
         };
 
-        try_errno!(unsafe {
+        try_evdev!(unsafe {
             raw::libevdev_enable_event_code(self.raw, r#type, code, data)
-        });
-
-        Ok(())
-    }
-
-    /// Forcibly disable an Type/Code on this device, even if the
-    /// underlying device provides it. This effectively mutes the respective set of
-    /// events. has() will return false for this Type/Code
-    ///
-    /// In most cases, a caller likely only wants to disable a single code, not
-    /// the whole type.
-    ///
-    /// Disabling EV_SYN will not work. In Peter's Words "Don't shoot yourself
-    /// in the foot. It hurts".
-    ///
-    /// This is a local modification only affecting only this representation of
-    /// this device.
-    pub fn disable(&self, blob: &Any) -> Result<()> {
-        if let Some(r#type) = blob.downcast_ref::<Type>() {
-            self.disable_event_type(r#type)
-        }
-        else if let Some(code) = blob.downcast_ref::<Code>() {
-            self.disable_event_code(*code)
-        }
-        else {
-            Err(Error::InvalidAny)
-        }
+        })
     }
 
     /// Forcibly disable an event type on this device, even if the underlying
@@ -688,11 +643,9 @@ impl Device {
     /// This is a local modification only affecting only this representation of
     /// this device.
     pub fn disable_event_type(&self, r#type: &Type) -> Result<()> {
-        try_errno!(unsafe {
+        try_evdev!(unsafe {
             raw::libevdev_disable_event_type(self.raw, r#type.as_raw())
-        });
-
-        Ok(())
+        })
     }
 
     /// Forcibly disable an event code on this device, even if the underlying
@@ -711,31 +664,30 @@ impl Device {
     /// foot. It hurts.
     pub fn disable_event_code<C: AsCodeRaw>(&self, code: C) -> Result<()> {
         let (r#type, code) = code.as_code_raw();
-        try_errno!(unsafe {
-            raw::libevdev_disable_event_code(self.raw,
-                                             r#type,
-                                             code)
-        });
-
-        Ok(())
+        try_evdev!(unsafe {
+            raw::libevdev_disable_event_code(self.raw, r#type, code)
+        })
     }
 
     /// Set the device's EV_ABS axis to the value defined in the abs
     /// parameter. This will be written to the kernel.
-    pub fn set_kernel_abs_info<C: AsCodeRaw>(&self, code: C, absinfo: &AbsInfo) -> Result<()> {
-        let (_, code) = code.as_code_raw();
+    pub fn kernel_set_abs_info<C: AsCodeRaw>(&self, code: C, absinfo: &AbsInfo) -> Result<()> {
+        let (r#type, code) = code.as_code_raw();
+        if Type::from_raw(r#type) != Type::ABS {
+            return Err(Error::NotAnAxis);
+        }
+
         let absinfo = raw::input_absinfo {
-                        value: absinfo.value,
-                        minimum: absinfo.minimum,
-                        maximum: absinfo.maximum,
-                        fuzz: absinfo.fuzz,
-                        flat: absinfo.flat,
-                        resolution: absinfo.resolution,
-                      };
+            value: absinfo.value,
+            minimum: absinfo.minimum,
+            maximum: absinfo.maximum,
+            fuzz: absinfo.fuzz,
+            flat: absinfo.flat,
+            resolution: absinfo.resolution,
+        };
 
         try_errno!(unsafe {
-            raw::libevdev_kernel_set_abs_info(self.raw, code,
-                                              &absinfo as *const _)
+            raw::libevdev_kernel_set_abs_info(self.raw, code, &absinfo as *const _)
         });
         Ok(())
     }
@@ -811,7 +763,7 @@ impl Device {
         match result {
             raw::LIBEVDEV_READ_STATUS_SUCCESS => Ok((ReadStatus::Success, event)),
             raw::LIBEVDEV_READ_STATUS_SYNC => Ok((ReadStatus::Sync, event)),
-            error => Error::errno_from_i32(-error),
+            error => Err(Error::Errno(Errno::from_i32(-error))),
         }
     }
 }
